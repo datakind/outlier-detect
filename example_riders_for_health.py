@@ -26,10 +26,11 @@ DATA_FILE = 'Sample_Transport_Log_2022-10-21.xlsx-Forms.csv'
 INTERVIEWER_ID = 'Courier ID'
 # Only look at data for this year
 YEAR = '2022'
-# Cutoff for outlier, if less than this don't try and calculate if an outlier
-EXPECTED_OBSERVATIONS_MIN = 20
+# Cutoff for number of times field filled in, if less than these no point checking outliers
+EXPECTED_RECORDS_MIN = 100
+OBSERVED_RECORDS_MIN = 5
 # Min outlier score, exclude anything below this
-MIN_SCORE = 50
+MIN_SCORE = 10
 
 def compute_mma(data, QUESTIONS, action):
     # Compute MMA outlier scores.
@@ -66,13 +67,11 @@ def _normalize_counts(counts, val=1):
 
 def plot_data(expected_frequencies_norm,observed_frequencies_norm, interviewer, action, column, score):
     X = np.arange(len(expected_frequencies_norm))
-    tick_spacing = int((X[len(X) - 1] - X[0]) / 5.)
-    print(tick_spacing)
+    tick_spacing = ((X[len(X) - 1] - X[0]) / 5.)
     ax = plt.subplot(111)
     ax.bar(X, expected_frequencies_norm.values(), width=0.2, color='b', align='center')
     ax.bar(X, observed_frequencies_norm.values(), width=0.2, color='g', align='center')
     ax.legend(('Expected', 'Observed'))
-    # plt.xticks(X, expected_frequencies_norm.keys())
     ax.xaxis.set_major_locator(ticker.MultipleLocator(tick_spacing))
     plt.title(
         f"Normalized responses for Rider: {interviewer} Action: {action} \n Field: {column} -- Score:{score}",
@@ -80,9 +79,11 @@ def plot_data(expected_frequencies_norm,observed_frequencies_norm, interviewer, 
     image_name = f"./images/{interviewer}_{action}_{column}.png"
     image_name = image_name.replace(' ','_')
     plt.savefig(image_name)
+    plt.close()
     return image_name
 
 def print_scores(scores, action):
+
     results = []
 
     for interviewer in scores.keys():
@@ -93,8 +94,8 @@ def print_scores(scores, action):
             score = scores[interviewer][column]['score']
 
             # Only look at potential outliers
-            if score < MIN_SCORE:
-                continue
+            #if score < MIN_SCORE:
+            #    continue
 
             print("Question: %s" % str(column))
             print("Score: %s" % str(score))
@@ -105,8 +106,10 @@ def print_scores(scores, action):
             p_value = scores[interviewer][column]['p_value']
 
             # If sample too small, ignore
-            expected_observations = sum(expected_frequencies.values())
-            if expected_observations < EXPECTED_OBSERVATIONS_MIN:
+            expected_records = sum(expected_frequencies.values())
+            observed_records = sum(observed_frequencies.values())
+            #print(expected_records, observed_records, EXPECTED_RECORDS_MIN, OBSERVED_RECORDS_MIN)
+            if expected_records < EXPECTED_RECORDS_MIN or observed_records < OBSERVED_RECORDS_MIN:
                 continue
 
             # The outlier algorithm doesn't return these sorted or normalized making debugging a bit tricky
@@ -125,10 +128,26 @@ def print_scores(scores, action):
             print("Observed Frequencies normalized: %s" % observed_frequencies_norm)
             print("Expected Frequencies normalized: %s" % expected_frequencies_norm)
             print("P-Value: %d" % p_value)
+            print("Expected records: %d" % expected_records)
+            print("Observation records: %d" % observed_records)
             print('\n')
 
             image_name = plot_data(expected_frequencies_norm,observed_frequencies_norm, interviewer, action, column, score)
-
+            print(image_name)
+            print({
+                "interviewer":interviewer,
+                "action": action,
+                "question": str(column),
+                "score": str(score),
+                "observed_frequencies": observed_frequencies,
+                "expected_frequencies": expected_frequencies,
+                "observed_frequencies_norm": observed_frequencies_norm,
+                "expected_frequencies_norm": expected_frequencies_norm,
+                "expected_records": expected_records,
+                "observed_records": observed_records,
+                "p_value": str(p_value),
+                "image_file": image_name
+            })
             results.append({
                 "interviewer":interviewer,
                 "action": action,
@@ -138,6 +157,8 @@ def print_scores(scores, action):
                 "expected_frequencies": expected_frequencies,
                 "observed_frequencies_norm": observed_frequencies_norm,
                 "expected_frequencies_norm": expected_frequencies_norm,
+                "expected_records": expected_records,
+                "observed_records": observed_records,
                 "p_value": str(p_value),
                 "image_file": image_name
             })
@@ -207,22 +228,23 @@ if __name__ == '__main__':
     results = results.copy().loc[(results["score"] != "nan") & (results["score"] != "inf")]
     results['score'] = pd.to_numeric(results['score'])
     results = results.sort_values(by='score', ascending=False)
+    results = results.reset_index()
 
     print("Saving ...")
     results.to_excel(writer, sheet_name='results')
 
     # Images need special treatment.
-    MAX_ROWS=10000
+    MAX_ROWS = 10000
     workbook = writer.book
     worksheet = writer.sheets['results']
-    worksheet.set_column('J:J', MAX_ROWS)
+    image_col = 'O'
+    worksheet.set_column(f'{image_col}:{image_col}', MAX_ROWS)
     worksheet.set_row(1, MAX_ROWS)
     for index, row in results.iterrows():
         r = index + 2
-        cell = f'J{r}'
+        cell = f'{image_col}{r}'
         print(cell, row['image_file'])
         worksheet.set_row(r, MAX_ROWS)
         worksheet.insert_image(cell, row['image_file'], {'x_scale': 0.5, 'y_scale': 0.5})
 
     writer.save()
-    #results.to_csv('./results.csv')
