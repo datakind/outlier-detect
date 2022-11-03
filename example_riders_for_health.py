@@ -16,9 +16,20 @@ import pandas as pd
 import sys
 import numpy as np
 from collections import OrderedDict
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import os
+import glob
+from io import BytesIO
 
 DATA_FILE = 'Sample_Transport_Log_2022-10-21.xlsx-Forms.csv'
 INTERVIEWER_ID = 'Courier ID'
+# Only look at data for this year
+YEAR = '2022'
+# Cutoff for outlier, if less than this don't try and calculate if an outlier
+EXPECTED_OBSERVATIONS_MIN = 20
+# Min outlier score, exclude anything below this
+MIN_SCORE = 50
 
 def compute_mma(data, QUESTIONS, action):
     # Compute MMA outlier scores.
@@ -53,14 +64,37 @@ def _normalize_counts(counts, val=1):
         frequencies[r] = val * float(counts[r]) / float(n)
     return frequencies
 
+def plot_data(expected_frequencies_norm,observed_frequencies_norm, interviewer, action, column, score):
+    X = np.arange(len(expected_frequencies_norm))
+    tick_spacing = int((X[len(X) - 1] - X[0]) / 5.)
+    print(tick_spacing)
+    ax = plt.subplot(111)
+    ax.bar(X, expected_frequencies_norm.values(), width=0.2, color='b', align='center')
+    ax.bar(X, observed_frequencies_norm.values(), width=0.2, color='g', align='center')
+    ax.legend(('Expected', 'Observed'))
+    # plt.xticks(X, expected_frequencies_norm.keys())
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(tick_spacing))
+    plt.title(
+        f"Normalized responses for Rider: {interviewer} Action: {action} \n Field: {column} -- Score:{score}",
+        fontsize=10)
+    image_name = f"./images/{interviewer}_{action}_{column}.png"
+    image_name = image_name.replace(' ','_')
+    plt.savefig(image_name)
+    return image_name
+
 def print_scores(scores, action):
     results = []
+
     for interviewer in scores.keys():
         print('\n')
         print("============================== %s ==================================" % interviewer)
         for column in scores[interviewer].keys():
             
             score = scores[interviewer][column]['score']
+
+            # Only look at potential outliers
+            if score < MIN_SCORE:
+                continue
 
             print("Question: %s" % str(column))
             print("Score: %s" % str(score))
@@ -69,6 +103,12 @@ def print_scores(scores, action):
             observed_frequencies = scores[interviewer][column]['observed_freq']
             expected_frequencies = scores[interviewer][column]['expected_freq']
             p_value = scores[interviewer][column]['p_value']
+
+            # If sample too small, ignore
+            expected_observations = sum(expected_frequencies.values())
+            if expected_observations < EXPECTED_OBSERVATIONS_MIN:
+                continue
+
             # The outlier algorithm doesn't return these sorted or normalized making debugging a bit tricky
             if "".join(list(observed_frequencies.keys())).isdigit():
                 observed_frequencies = {int(k): v for k, v in observed_frequencies.items()}
@@ -87,6 +127,8 @@ def print_scores(scores, action):
             print("P-Value: %d" % p_value)
             print('\n')
 
+            image_name = plot_data(expected_frequencies_norm,observed_frequencies_norm, interviewer, action, column, score)
+
             results.append({
                 "interviewer":interviewer,
                 "action": action,
@@ -96,17 +138,25 @@ def print_scores(scores, action):
                 "expected_frequencies": expected_frequencies,
                 "observed_frequencies_norm": observed_frequencies_norm,
                 "expected_frequencies_norm": expected_frequencies_norm,
-                "p_value": str(p_value)
+                "p_value": str(p_value),
+                "image_file": image_name
             })
     results = pd.DataFrame(results)
     return results
 
 if __name__ == '__main__':
 
+    files = glob.glob('./images/*')
+    for f in files:
+        print("rm "+f)
+        os.remove(f)
+
+    writer = pd.ExcelWriter('./dimagi-algorithm-test.xlsx', engine='xlsxwriter')
+
     datain = pd.read_csv(DATA_FILE)  # Uncomment to load as pandas.DataFrame.
 
     # Filter to data this year
-    datain = datain.loc[datain["Date & Time"].str.contains("2022")]
+    datain = datain.loc[datain["Date & Time"].str.contains(YEAR)]
     # data = data.replace('---', np.nan)
 
     dfs = []
@@ -138,6 +188,8 @@ if __name__ == '__main__':
         QUESTIONS = list(data.columns)
         QUESTIONS.remove(INTERVIEWER_ID)
 
+        #QUESTIONS = QUESTIONS[0:4]
+
         print("Analyzing the following columns ...")
         for c in data.columns:
             print(c)
@@ -152,7 +204,25 @@ if __name__ == '__main__':
         dfs.append(results)
 
     results = pd.concat(dfs)
-    results = results.copy().loc[results["score"] != "nan"]
+    results = results.copy().loc[(results["score"] != "nan") & (results["score"] != "inf")]
     results['score'] = pd.to_numeric(results['score'])
     results = results.sort_values(by='score', ascending=False)
-    results.to_csv('./results.csv')
+
+    print("Saving ...")
+    results.to_excel(writer, sheet_name='results')
+
+    # Images need special treatment.
+    MAX_ROWS=10000
+    workbook = writer.book
+    worksheet = writer.sheets['results']
+    worksheet.set_column('J:J', MAX_ROWS)
+    worksheet.set_row(1, MAX_ROWS)
+    for index, row in results.iterrows():
+        r = index + 2
+        cell = f'J{r}'
+        print(cell, row['image_file'])
+        worksheet.set_row(r, MAX_ROWS)
+        worksheet.insert_image(cell, row['image_file'], {'x_scale': 0.5, 'y_scale': 0.5})
+
+    writer.save()
+    #results.to_csv('./results.csv')
