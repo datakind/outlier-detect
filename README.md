@@ -1,3 +1,15 @@
+# DataKind Dimagi outlier algorithm testing with Riders for Health data
+
+This fork is to test the Outlier detection algorithm with Riders for Health sample data
+
+## Setup
+
+1. Set up your environment using instructions below
+2. Save [Riders sample data](https://docs.google.com/spreadsheets/d/1MPNgemLmeNQFT-KGhcNmeAUBehDhhvlK/edit?usp=sharing&ouid=106808949113099347741&rtpof=true&sd=true)
+   to this folder
+3. Run `python3 example_riders_for_health.py`
+4. Check output file `results.csv`
+
 # Outlier Detect
 
 **Author**: Ben Birnbaum (benjamin.birnbaum@gmail.com)
