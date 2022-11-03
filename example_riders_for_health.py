@@ -6,7 +6,13 @@ example.py
 Created by Ben Birnbaum on 2012-12-02.
 benjamin.birnbaum@gmail.com
 
-Example use of outlierdetect.py module.
+Extended by Matthew Harris as part of testing of Riders data. New features:
+
+1. Automatic testing of categorical fields in Riders log data
+2. Output of normalized distributions
+3. Output to excel sheet, to include embedded distribution images
+
+
 """
 
 from __future__ import print_function
